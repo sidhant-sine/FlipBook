@@ -67,14 +67,21 @@
         const page = await pdf.getPage(number);
         const original = page.getViewport({ scale: 1 });
         const scale = Math.min(1.8, Math.max(0.75, (stageWidth / 2) / original.width));
+        // Keep the displayed page size separate from its pixel resolution.
+        // Rendering only at the CSS/display size makes text blurry on high-DPI
+        // screens and when the flipbook page is enlarged by PageFlip.
         const viewport = page.getViewport({ scale });
+        const pixelRatio = Math.min(2.5, Math.max(1.5, window.devicePixelRatio || 1));
+        const renderViewport = page.getViewport({ scale: scale * pixelRatio });
         const canvas = document.createElement('canvas');
         const context = canvas.getContext('2d', { alpha: false });
-        canvas.width = Math.ceil(viewport.width);
-        canvas.height = Math.ceil(viewport.height);
+        canvas.width = Math.ceil(renderViewport.width);
+        canvas.height = Math.ceil(renderViewport.height);
+        canvas.style.width = `${viewport.width}px`;
+        canvas.style.height = `${viewport.height}px`;
         context.fillStyle = '#ffffff';
         context.fillRect(0, 0, canvas.width, canvas.height);
-        await page.render({ canvasContext: context, viewport }).promise;
+        await page.render({ canvasContext: context, viewport: renderViewport }).promise;
         const pageDiv = document.createElement('div');
         pageDiv.className = 'page';
         pageDiv.appendChild(canvas);
