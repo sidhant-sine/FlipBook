@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#101827">
+  <title>PDF Flipbook</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/page-flip@2.0.7/dist/js/page-flip.browser.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span class="brand-mark">▤</span><span>PDF <strong>Flipbook</strong></span></div>
+    <a class="github-link" href="https://github.com/" target="_blank" rel="noopener">GitHub</a>
+  </header>
+
+  <main>
+    <section class="intro">
+      <p class="eyebrow">YOUR DOCUMENT, REIMAGINED</p>
+      <h1>Turn a PDF into a <span>flipbook.</span></h1>
+      <p class="subtitle">Choose a PDF and read it like a real book. Your document stays in your browser.</p>
+    </section>
+
+    <section class="upload-panel" id="uploadPanel">
+      <label class="upload-area" for="pdfInput" id="dropArea">
+        <span class="upload-icon">↑</span>
+        <span class="upload-title">Choose your PDF</span>
+        <span class="upload-hint">Tap to browse or drag and drop a file here</span>
+        <span class="file-name" id="fileName">No file selected</span>
+      </label>
+      <input id="pdfInput" type="file" accept="application/pdf,.pdf" hidden>
+      <button id="createBtn" class="primary-btn" disabled>Create flipbook</button>
+      <p class="privacy-note">🔒 Private by design — your PDF is not sent to a server.</p>
+    </section>
+
+    <section class="reader-section" id="readerSection" hidden>
+      <div class="reader-heading">
+        <div><h2 id="documentTitle">Your flipbook</h2><p id="pageStatus">Ready to read</p></div>
+        <button class="plain-btn" id="newPdfBtn">＋ New PDF</button>
+      </div>
+      <div class="book-stage">
+        <div id="book" class="book"></div>
+      </div>
+      <div class="reader-controls">
+        <button class="control-btn" id="prevBtn" aria-label="Previous page">← <span>Previous</span></button>
+        <span class="page-counter" id="pageCounter">Page 1</span>
+        <button class="control-btn" id="nextBtn" aria-label="Next page"><span>Next</span> →</button>
+      </div>
+      <div class="reader-tools">
+        <button class="plain-btn" id="fullscreenBtn">⛶ Fullscreen</button>
+        <button class="plain-btn" id="downloadBtn">↓ Download PDF</button>
+      </div>
+      <p class="tip">Tip: You can also turn pages by dragging a corner or swiping on a touchscreen.</p>
+    </section>
+
+    <div class="status" id="status" role="status" aria-live="polite"></div>
+  </main>
+
+  <footer>Made for reading · Works on desktop and mobile</footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

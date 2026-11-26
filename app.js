@@ -1,0 +1,156 @@
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const input = $('pdfInput');
+  const dropArea = $('dropArea');
+  const createBtn = $('createBtn');
+  const status = $('status');
+  const uploadPanel = $('uploadPanel');
+  const readerSection = $('readerSection');
+  const bookElement = $('book');
+  let selectedFile = null;
+  let pageFlip = null;
+  let pdfBytes = null;
+  let pageCount = 0;
+
+  if (window.pdfjsLib) {
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  }
+
+  function setStatus(message, error = false) {
+    status.textContent = message;
+    status.classList.toggle('error', error);
+  }
+
+  function selectFile(file) {
+    if (!file) return;
+    if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
+      selectedFile = null;
+      createBtn.disabled = true;
+      $('fileName').textContent = 'Please select a PDF file.';
+      setStatus('That file does not appear to be a PDF.', true);
+      return;
+    }
+    selectedFile = file;
+    $('fileName').textContent = file.name;
+    createBtn.disabled = false;
+    setStatus('PDF selected. Click “Create flipbook” to begin.');
+  }
+
+  input.addEventListener('change', () => selectFile(input.files && input.files[0]));
+  dropArea.addEventListener('dragover', (event) => { event.preventDefault(); dropArea.classList.add('dragging'); });
+  dropArea.addEventListener('dragleave', () => dropArea.classList.remove('dragging'));
+  dropArea.addEventListener('drop', (event) => {
+    event.preventDefault(); dropArea.classList.remove('dragging');
+    selectFile(event.dataTransfer.files && event.dataTransfer.files[0]);
+  });
+
+  createBtn.addEventListener('click', createFlipbook);
+
+  async function createFlipbook() {
+    if (!selectedFile) return;
+    if (!window.pdfjsLib || !window.St || !window.St.PageFlip) {
+      setStatus('Could not load the viewer libraries. Check your internet connection and refresh.', true);
+      return;
+    }
+    createBtn.disabled = true;
+    setStatus('Reading PDF…');
+    try {
+      pdfBytes = await selectedFile.arrayBuffer();
+      const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(pdfBytes.slice(0)) }).promise;
+      pageCount = pdf.numPages;
+      bookElement.innerHTML = '';
+      if (pageFlip) { try { pageFlip.destroy(); } catch (_) {} pageFlip = null; }
+      const pages = [];
+      const stageWidth = Math.min(900, Math.max(320, $('book').parentElement.clientWidth - 30));
+      for (let number = 1; number <= pageCount; number++) {
+        setStatus(`Rendering page ${number} of ${pageCount}…`);
+        const page = await pdf.getPage(number);
+        const original = page.getViewport({ scale: 1 });
+        const scale = Math.min(1.8, Math.max(0.75, (stageWidth / 2) / original.width));
+        const viewport = page.getViewport({ scale });
+        const canvas = document.createElement('canvas');
+        const context = canvas.getContext('2d', { alpha: false });
+        canvas.width = Math.ceil(viewport.width);
+        canvas.height = Math.ceil(viewport.height);
+        context.fillStyle = '#ffffff';
+        context.fillRect(0, 0, canvas.width, canvas.height);
+        await page.render({ canvasContext: context, viewport }).promise;
+        const pageDiv = document.createElement('div');
+        pageDiv.className = 'page';
+        pageDiv.appendChild(canvas);
+        pages.push(pageDiv);
+      }
+      const first = await pdf.getPage(1);
+      const firstViewport = first.getViewport({ scale: 1 });
+      const bookWidth = Math.max(300, Math.min(540, Math.floor(stageWidth / 2)));
+      const bookHeight = Math.floor(bookWidth * firstViewport.height / firstViewport.width);
+      $('book').style.width = `${bookWidth}px`;
+      $('book').style.height = `${Math.min(900, Math.max(380, bookHeight))}px`;
+      pages.forEach(page => bookElement.appendChild(page));
+      pageFlip = new St.PageFlip(bookElement, {
+        width: bookWidth,
+        height: Math.min(900, Math.max(380, bookHeight)),
+        size: 'stretch',
+        minWidth: 250,
+        maxWidth: 1000,
+        minHeight: 350,
+        maxHeight: 1400,
+        showCover: pageCount > 1,
+        drawShadow: true,
+        flippingTime: 700,
+        usePortrait: true,
+        startPage: 0,
+        autoSize: true,
+        maxShadowOpacity: 0.35,
+        mobileScrollSupport: true
+      });
+      pageFlip.loadFromHTML(bookElement.querySelectorAll('.page'));
+      pageFlip.on('flip', (event) => updatePage(event.data));
+      $('documentTitle').textContent = selectedFile.name;
+      uploadPanel.hidden = true;
+      readerSection.hidden = false;
+      updatePage(0);
+      setStatus('Flipbook ready. Enjoy reading!');
+      readerSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    } catch (error) {
+      console.error(error);
+      setStatus('Unable to open this PDF. It may be damaged, password-protected, or too large for this device.', true);
+    } finally {
+      createBtn.disabled = !selectedFile;
+    }
+  }
+
+  function updatePage(index) {
+    if (!pageFlip) return;
+    const current = Math.min(pageCount, index + 1);
+    $('pageCounter').textContent = pageCount ? `Page ${current} / ${pageCount}` : '';
+    $('pageStatus').textContent = `${pageCount} page${pageCount === 1 ? '' : 's'}`;
+    $('prevBtn').disabled = index <= 0;
+    $('nextBtn').disabled = index >= pageCount - 1;
+  }
+
+  $('prevBtn').addEventListener('click', () => pageFlip && pageFlip.flipPrev());
+  $('nextBtn').addEventListener('click', () => pageFlip && pageFlip.flipNext());
+  $('newPdfBtn').addEventListener('click', () => {
+    readerSection.hidden = true;
+    uploadPanel.hidden = false;
+    setStatus('Choose another PDF when you are ready.');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  });
+  $('fullscreenBtn').addEventListener('click', async () => {
+    const stage = $('readerSection');
+    try {
+      if (!document.fullscreenElement) await stage.requestFullscreen();
+      else await document.exitFullscreen();
+    } catch (_) { setStatus('Fullscreen is not supported by this browser.', true); }
+  });
+  $('downloadBtn').addEventListener('click', () => {
+    if (!pdfBytes || !selectedFile) return;
+    const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url; anchor.download = selectedFile.name;
+    document.body.appendChild(anchor); anchor.click(); anchor.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  });
+})();
