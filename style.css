@@ -18,11 +18,18 @@ h1 { font-size:clamp(30px,5vw,52px); line-height:1.08; letter-spacing:-1.8px; ma
 .privacy-note { margin:12px 0 0; color:#8594aa; font-size:11px; text-align:center; }
 .reader-section { margin:32px 0 10px; }.reader-heading { display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom:14px; }.reader-heading h2 { font-size:18px; margin:0 0 5px; overflow-wrap:anywhere; }.reader-heading p { color:var(--muted); font-size:12px; margin:0; }
 .plain-btn { background:transparent; border:1px solid #35445c; color:#d8e0ef; padding:9px 12px; border-radius:10px; font-size:12px; cursor:pointer; white-space:nowrap; }.plain-btn:hover { background:#1c2a40; }
-.book-stage { display:flex; justify-content:center; align-items:center; padding:24px 10px; min-height:320px; overflow:hidden; border:1px solid rgba(255,255,255,.06); border-radius:18px; background:rgba(4,8,15,.38); }
-.book { margin:0 auto; }.page { background:white; overflow:hidden; }.page canvas { display:block; width:100%; height:100%; object-fit:contain; }
+.book-stage { display:flex; justify-content:center; align-items:center; padding:20px 10px; min-height:0; overflow:visible; border:1px solid rgba(255,255,255,.06); border-radius:18px; background:rgba(4,8,15,.38); }
+.book { margin:0 auto; flex:0 0 auto; }.page { background:white; overflow:hidden; }.page canvas { display:block; width:100%; height:100%; object-fit:fill; }
 .reader-controls { display:flex; align-items:center; justify-content:center; gap:20px; margin:18px 0 10px; }.control-btn { background:#1b2940; border:1px solid #34445f; color:#eef2ff; border-radius:11px; padding:10px 16px; cursor:pointer; font-size:13px; }.control-btn:hover:not(:disabled) { background:#2a3b59; }.control-btn:disabled { opacity:.35; cursor:not-allowed; }.page-counter { min-width:100px; text-align:center; color:#dce4f2; font-size:12px; font-variant-numeric:tabular-nums; }
 .reader-tools { display:flex; justify-content:center; gap:10px; flex-wrap:wrap; }.tip { text-align:center; color:#8492a8; font-size:11px; margin:16px 0 0; }
 .status { text-align:center; color:#aab5c8; font-size:13px; min-height:22px; margin:14px 0 28px; }.status.error { color:#ffb5b5; }
 footer { text-align:center; padding:28px 16px 34px; color:#68788f; font-size:11px; }
 [hidden] { display:none !important; }
 @media (max-width:600px) { .intro { padding:42px 0 22px; } .upload-panel { padding:12px; } .upload-area { min-height:165px; } .reader-heading { align-items:flex-start; } .book-stage { padding:12px 0; border-radius:12px; } .reader-controls { gap:10px; }.control-btn { padding:10px 12px; }.control-btn span { display:none; } }
+
+/* Keep the entire PDF page visible in normal and fullscreen reading modes. */
+.reader-section:fullscreen { width:100%; height:100%; overflow:auto; background:#0b1220; padding:14px 16px 22px; }
+.reader-section:fullscreen .book-stage { min-height:0; padding:12px 8px; overflow:visible; }
+.reader-section:fullscreen .reader-heading { margin-bottom:8px; }
+.reader-section:fullscreen .reader-controls { margin:10px 0; }
+@media (max-height:520px) { .reader-section:fullscreen .reader-heading p { display:none; } .reader-section:fullscreen .tip { margin:6px 0; } }

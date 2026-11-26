@@ -11,6 +11,9 @@
   let pageFlip = null;
   let pdfBytes = null;
   let pageCount = 0;
+  let pdfDocument = null;
+  let pageAspectRatio = 1.414;
+  let resizeTimer = null;
 
   if (window.pdfjsLib) {
     pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
@@ -57,21 +60,24 @@
     try {
       pdfBytes = await selectedFile.arrayBuffer();
       const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(pdfBytes.slice(0)) }).promise;
+      pdfDocument = pdf;
       pageCount = pdf.numPages;
       bookElement.innerHTML = '';
       if (pageFlip) { try { pageFlip.destroy(); } catch (_) {} pageFlip = null; }
       const pages = [];
-      const stageWidth = Math.min(900, Math.max(320, $('book').parentElement.clientWidth - 30));
+      const first = await pdf.getPage(1);
+      const firstViewport = first.getViewport({ scale: 1 });
+      pageAspectRatio = firstViewport.height / firstViewport.width;
+      const dimensions = calculatePageDimensions();
+      const pageWidth = dimensions.width;
+      const pageHeight = dimensions.height;
       for (let number = 1; number <= pageCount; number++) {
         setStatus(`Rendering page ${number} of ${pageCount}…`);
         const page = await pdf.getPage(number);
         const original = page.getViewport({ scale: 1 });
-        const scale = Math.min(1.8, Math.max(0.75, (stageWidth / 2) / original.width));
-        // Keep the displayed page size separate from its pixel resolution.
-        // Rendering only at the CSS/display size makes text blurry on high-DPI
-        // screens and when the flipbook page is enlarged by PageFlip.
+        const scale = pageWidth / original.width;
         const viewport = page.getViewport({ scale });
-        const pixelRatio = Math.min(2.5, Math.max(1.5, window.devicePixelRatio || 1));
+        const pixelRatio = Math.min(3, Math.max(1.5, window.devicePixelRatio || 1));
         const renderViewport = page.getViewport({ scale: scale * pixelRatio });
         const canvas = document.createElement('canvas');
         const context = canvas.getContext('2d', { alpha: false });
@@ -87,30 +93,10 @@
         pageDiv.appendChild(canvas);
         pages.push(pageDiv);
       }
-      const first = await pdf.getPage(1);
-      const firstViewport = first.getViewport({ scale: 1 });
-      const bookWidth = Math.max(300, Math.min(540, Math.floor(stageWidth / 2)));
-      const bookHeight = Math.floor(bookWidth * firstViewport.height / firstViewport.width);
-      $('book').style.width = `${bookWidth}px`;
-      $('book').style.height = `${Math.min(900, Math.max(380, bookHeight))}px`;
+      bookElement.style.width = `${pageWidth}px`;
+      bookElement.style.height = `${pageHeight}px`;
       pages.forEach(page => bookElement.appendChild(page));
-      pageFlip = new St.PageFlip(bookElement, {
-        width: bookWidth,
-        height: Math.min(900, Math.max(380, bookHeight)),
-        size: 'stretch',
-        minWidth: 250,
-        maxWidth: 1000,
-        minHeight: 350,
-        maxHeight: 1400,
-        showCover: pageCount > 1,
-        drawShadow: true,
-        flippingTime: 700,
-        usePortrait: true,
-        startPage: 0,
-        autoSize: true,
-        maxShadowOpacity: 0.35,
-        mobileScrollSupport: true
-      });
+      pageFlip = makePageFlip(pageWidth, pageHeight);
       pageFlip.loadFromHTML(bookElement.querySelectorAll('.page'));
       pageFlip.on('flip', (event) => updatePage(event.data));
       $('documentTitle').textContent = selectedFile.name;
@@ -126,6 +112,57 @@
       createBtn.disabled = !selectedFile;
     }
   }
+
+  function calculatePageDimensions() {
+    const stage = $('bookStage');
+    const availableWidth = Math.max(260, stage.clientWidth - 28);
+    const isFullscreen = Boolean(document.fullscreenElement);
+    const availableHeight = Math.max(300, window.innerHeight - (isFullscreen ? 190 : 250));
+    // PageFlip's width/height are per page. Keep the PDF's true aspect ratio
+    // and size the page to fit both the stage width and the visible height.
+    const maxPageWidth = availableWidth > 700 ? Math.min(540, availableWidth / 2) : availableWidth;
+    const width = Math.max(180, Math.floor(Math.min(maxPageWidth, availableHeight / pageAspectRatio)));
+    return { width, height: Math.max(1, Math.floor(width * pageAspectRatio)) };
+  }
+
+  function makePageFlip(width, height) {
+    return new St.PageFlip(bookElement, {
+      width, height,
+      size: 'fixed',
+      minWidth: 180,
+      maxWidth: 900,
+      minHeight: 250,
+      maxHeight: 1600,
+      showCover: pageCount > 1,
+      drawShadow: true,
+      flippingTime: 700,
+      usePortrait: true,
+      startPage: 0,
+      autoSize: false,
+      maxShadowOpacity: 0.35,
+      mobileScrollSupport: true
+    });
+  }
+
+  function resizeFlipbook() {
+    if (!pageFlip || !pdfDocument) return;
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => {
+      const current = pageFlip ? pageFlip.getCurrentPageIndex() : 0;
+      const dimensions = calculatePageDimensions();
+      try { pageFlip.destroy(); } catch (_) {}
+      bookElement.style.width = `${dimensions.width}px`;
+      bookElement.style.height = `${dimensions.height}px`;
+      pageFlip = makePageFlip(dimensions.width, dimensions.height);
+      pageFlip.loadFromHTML(bookElement.querySelectorAll('.page'));
+      pageFlip.on('flip', (event) => updatePage(event.data));
+      if (current > 0) pageFlip.turnToPage(Math.min(current, pageCount - 1));
+      updatePage(current);
+    }, 120);
+  }
+
+  window.addEventListener('resize', resizeFlipbook);
+  document.addEventListener('fullscreenchange', resizeFlipbook);
 
   function updatePage(index) {
     if (!pageFlip) return;
