@@ -33,3 +33,11 @@ footer { text-align:center; padding:28px 16px 34px; color:#68788f; font-size:11p
 .reader-section:fullscreen .reader-heading { margin-bottom:8px; }
 .reader-section:fullscreen .reader-controls { margin:10px 0; }
 @media (max-height:520px) { .reader-section:fullscreen .reader-heading p { display:none; } .reader-section:fullscreen .tip { margin:6px 0; } }
+
+/* Mobile stability: don't let browser viewport changes clip the page. */
+.book-stage { max-width:100%; min-width:0; }
+.book { max-width:100%; }
+.page { flex-shrink:0; }
+.page canvas { max-width:100%; image-rendering:auto; }
+.reader-section:fullscreen { box-sizing:border-box; max-width:100vw; max-height:100dvh; }
+.reader-section:fullscreen .book-stage { max-width:100%; }

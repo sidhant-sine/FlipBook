@@ -7,13 +7,19 @@
   const uploadPanel = $('uploadPanel');
   const readerSection = $('readerSection');
   const bookElement = $('book');
+
   let selectedFile = null;
   let pageFlip = null;
   let pdfBytes = null;
-  let pageCount = 0;
   let pdfDocument = null;
+  let pageCount = 0;
   let pageAspectRatio = 1.414;
-  let resizeTimer = null;
+  let pageWidth = 0;
+  let pageHeight = 0;
+  let pageNodes = [];
+  let renderJobs = new Map();
+  let renderToken = 0;
+  const MAX_CANVASES = 4;
 
   if (window.pdfjsLib) {
     pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
@@ -46,8 +52,17 @@
     event.preventDefault(); dropArea.classList.remove('dragging');
     selectFile(event.dataTransfer.files && event.dataTransfer.files[0]);
   });
-
   createBtn.addEventListener('click', createFlipbook);
+
+  function calculatePageDimensions() {
+    const stage = $('bookStage');
+    const availableWidth = Math.max(260, stage.clientWidth - 24);
+    const availableHeight = Math.max(320, window.innerHeight - 300);
+    const maxWidth = availableWidth > 700 ? Math.min(520, availableWidth / 2) : availableWidth;
+    pageWidth = Math.floor(Math.min(maxWidth, availableHeight / pageAspectRatio));
+    pageWidth = Math.max(180, pageWidth);
+    pageHeight = Math.floor(pageWidth * pageAspectRatio);
+  }
 
   async function createFlipbook() {
     if (!selectedFile) return;
@@ -56,54 +71,64 @@
       return;
     }
     createBtn.disabled = true;
-    setStatus('Reading PDF…');
+    setStatus('Opening PDF…');
     try {
+      destroyViewer();
       pdfBytes = await selectedFile.arrayBuffer();
-      const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(pdfBytes.slice(0)) }).promise;
-      pdfDocument = pdf;
-      pageCount = pdf.numPages;
-      bookElement.innerHTML = '';
-      if (pageFlip) { try { pageFlip.destroy(); } catch (_) {} pageFlip = null; }
-      const pages = [];
-      const first = await pdf.getPage(1);
-      const firstViewport = first.getViewport({ scale: 1 });
+      pdfDocument = await pdfjsLib.getDocument({ data: new Uint8Array(pdfBytes.slice(0)) }).promise;
+      pageCount = pdfDocument.numPages;
+      const firstPage = await pdfDocument.getPage(1);
+      const firstViewport = firstPage.getViewport({ scale: 1 });
       pageAspectRatio = firstViewport.height / firstViewport.width;
-      const dimensions = calculatePageDimensions();
-      const pageWidth = dimensions.width;
-      const pageHeight = dimensions.height;
-      for (let number = 1; number <= pageCount; number++) {
-        setStatus(`Rendering page ${number} of ${pageCount}…`);
-        const page = await pdf.getPage(number);
-        const original = page.getViewport({ scale: 1 });
-        const scale = pageWidth / original.width;
-        const viewport = page.getViewport({ scale });
-        const pixelRatio = Math.min(3, Math.max(1.5, window.devicePixelRatio || 1));
-        const renderViewport = page.getViewport({ scale: scale * pixelRatio });
-        const canvas = document.createElement('canvas');
-        const context = canvas.getContext('2d', { alpha: false });
-        canvas.width = Math.ceil(renderViewport.width);
-        canvas.height = Math.ceil(renderViewport.height);
-        canvas.style.width = `${viewport.width}px`;
-        canvas.style.height = `${viewport.height}px`;
-        context.fillStyle = '#ffffff';
-        context.fillRect(0, 0, canvas.width, canvas.height);
-        await page.render({ canvasContext: context, viewport: renderViewport }).promise;
-        const pageDiv = document.createElement('div');
-        pageDiv.className = 'page';
-        pageDiv.appendChild(canvas);
-        pages.push(pageDiv);
+      calculatePageDimensions();
+
+      bookElement.innerHTML = '';
+      pageNodes = [];
+      renderJobs.clear();
+      for (let i = 0; i < pageCount; i++) {
+        const node = document.createElement('div');
+        node.className = 'page';
+        node.style.width = `${pageWidth}px`;
+        node.style.height = `${pageHeight}px`;
+        node.dataset.pageIndex = String(i);
+        pageNodes.push(node);
+        bookElement.appendChild(node);
       }
       bookElement.style.width = `${pageWidth}px`;
       bookElement.style.height = `${pageHeight}px`;
-      pages.forEach(page => bookElement.appendChild(page));
-      pageFlip = makePageFlip(pageWidth, pageHeight);
+
+      // Render only the opening spread. Remaining pages are rendered on demand.
+      await renderWindow(0, true);
+      pageFlip = new St.PageFlip(bookElement, {
+        width: pageWidth,
+        height: pageHeight,
+        size: 'fixed',
+        minWidth: 180,
+        maxWidth: 900,
+        minHeight: 250,
+        maxHeight: 1600,
+        showCover: pageCount > 1,
+        drawShadow: true,
+        flippingTime: 700,
+        usePortrait: true,
+        startPage: 0,
+        autoSize: false,
+        maxShadowOpacity: 0.35,
+        mobileScrollSupport: true,
+        useMouseEvents: true
+      });
       pageFlip.loadFromHTML(bookElement.querySelectorAll('.page'));
-      pageFlip.on('flip', (event) => updatePage(event.data));
+      pageFlip.on('flip', (event) => {
+        const index = Number(event.data) || 0;
+        updatePage(index);
+        renderWindow(index).catch(console.error);
+      });
+
       $('documentTitle').textContent = selectedFile.name;
       uploadPanel.hidden = true;
       readerSection.hidden = false;
       updatePage(0);
-      setStatus('Flipbook ready. Enjoy reading!');
+      setStatus('Flipbook ready. Pages load as you read to keep your phone responsive.');
       readerSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
     } catch (error) {
       console.error(error);
@@ -113,56 +138,73 @@
     }
   }
 
-  function calculatePageDimensions() {
-    const stage = $('bookStage');
-    const availableWidth = Math.max(260, stage.clientWidth - 28);
-    const isFullscreen = Boolean(document.fullscreenElement);
-    const availableHeight = Math.max(300, window.innerHeight - (isFullscreen ? 190 : 250));
-    // PageFlip's width/height are per page. Keep the PDF's true aspect ratio
-    // and size the page to fit both the stage width and the visible height.
-    const maxPageWidth = availableWidth > 700 ? Math.min(540, availableWidth / 2) : availableWidth;
-    const width = Math.max(180, Math.floor(Math.min(maxPageWidth, availableHeight / pageAspectRatio)));
-    return { width, height: Math.max(1, Math.floor(width * pageAspectRatio)) };
+  async function renderPage(index, token) {
+    if (index < 0 || index >= pageCount || token !== renderToken) return;
+    const node = pageNodes[index];
+    if (node.querySelector('canvas')) return;
+    if (renderJobs.has(index)) return renderJobs.get(index);
+
+    const job = (async () => {
+      const page = await pdfDocument.getPage(index + 1);
+      if (token !== renderToken) return;
+      const base = page.getViewport({ scale: 1 });
+      const cssScale = pageWidth / base.width;
+      const cssViewport = page.getViewport({ scale: cssScale });
+      // Use a moderate device pixel ratio: crisp text without allocating hundreds of large canvases.
+      const pixelRatio = Math.min(2.25, Math.max(1.5, window.devicePixelRatio || 1));
+      const renderViewport = page.getViewport({ scale: cssScale * pixelRatio });
+      const canvas = document.createElement('canvas');
+      const context = canvas.getContext('2d', { alpha: false });
+      canvas.width = Math.ceil(renderViewport.width);
+      canvas.height = Math.ceil(renderViewport.height);
+      canvas.style.width = `${cssViewport.width}px`;
+      canvas.style.height = `${cssViewport.height}px`;
+      context.fillStyle = '#fff';
+      context.fillRect(0, 0, canvas.width, canvas.height);
+      await page.render({ canvasContext: context, viewport: renderViewport }).promise;
+      if (token !== renderToken) {
+        canvas.width = 0; canvas.height = 0;
+        return;
+      }
+      node.appendChild(canvas);
+      page.cleanup();
+    })().finally(() => renderJobs.delete(index));
+    renderJobs.set(index, job);
+    return job;
   }
 
-  function makePageFlip(width, height) {
-    return new St.PageFlip(bookElement, {
-      width, height,
-      size: 'fixed',
-      minWidth: 180,
-      maxWidth: 900,
-      minHeight: 250,
-      maxHeight: 1600,
-      showCover: pageCount > 1,
-      drawShadow: true,
-      flippingTime: 700,
-      usePortrait: true,
-      startPage: 0,
-      autoSize: false,
-      maxShadowOpacity: 0.35,
-      mobileScrollSupport: true
+  async function renderWindow(index, initial = false) {
+    const token = renderToken;
+    // Render current and nearby pages; do not rasterize the whole PDF into RAM.
+    const wanted = [index - 1, index, index + 1, index + 2]
+      .filter((n) => n >= 0 && n < pageCount);
+    for (const n of wanted) {
+      if (token !== renderToken) return;
+      await renderPage(n, token);
+    }
+    const keep = new Set(wanted);
+    // Release backing pixel memory from pages outside the small reading window.
+    pageNodes.forEach((node, n) => {
+      if (keep.has(n)) return;
+      const canvas = node.querySelector('canvas');
+      if (canvas) {
+        canvas.width = 0;
+        canvas.height = 0;
+        canvas.remove();
+      }
     });
+    if (initial) setStatus(`Prepared first pages of ${pageCount}-page PDF…`);
   }
 
-  function resizeFlipbook() {
-    if (!pageFlip || !pdfDocument) return;
-    clearTimeout(resizeTimer);
-    resizeTimer = setTimeout(() => {
-      const current = pageFlip ? pageFlip.getCurrentPageIndex() : 0;
-      const dimensions = calculatePageDimensions();
-      try { pageFlip.destroy(); } catch (_) {}
-      bookElement.style.width = `${dimensions.width}px`;
-      bookElement.style.height = `${dimensions.height}px`;
-      pageFlip = makePageFlip(dimensions.width, dimensions.height);
-      pageFlip.loadFromHTML(bookElement.querySelectorAll('.page'));
-      pageFlip.on('flip', (event) => updatePage(event.data));
-      if (current > 0) pageFlip.turnToPage(Math.min(current, pageCount - 1));
-      updatePage(current);
-    }, 120);
+  function destroyViewer() {
+    renderToken++;
+    renderJobs.clear();
+    if (pageFlip) { try { pageFlip.destroy(); } catch (_) {} pageFlip = null; }
+    bookElement.innerHTML = '';
+    pageNodes = [];
+    pdfDocument = null;
+    pageCount = 0;
   }
-
-  window.addEventListener('resize', resizeFlipbook);
-  document.addEventListener('fullscreenchange', resizeFlipbook);
 
   function updatePage(index) {
     if (!pageFlip) return;
@@ -173,25 +215,30 @@
     $('nextBtn').disabled = index >= pageCount - 1;
   }
 
-  $('prevBtn').addEventListener('click', () => pageFlip && pageFlip.flipPrev());
-  $('nextBtn').addEventListener('click', () => pageFlip && pageFlip.flipNext());
+  $('prevBtn').addEventListener('click', () => {
+    if (pageFlip) pageFlip.flipPrev();
+  });
+  $('nextBtn').addEventListener('click', () => {
+    if (pageFlip) pageFlip.flipNext();
+  });
   $('newPdfBtn').addEventListener('click', () => {
+    destroyViewer();
     readerSection.hidden = true;
     uploadPanel.hidden = false;
     setStatus('Choose another PDF when you are ready.');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   });
   $('fullscreenBtn').addEventListener('click', async () => {
-    const stage = $('readerSection');
     try {
-      if (!document.fullscreenElement) await stage.requestFullscreen();
+      if (!document.fullscreenElement) await readerSection.requestFullscreen();
       else await document.exitFullscreen();
-    } catch (_) { setStatus('Fullscreen is not supported by this browser.', true); }
+    } catch (_) {
+      setStatus('Fullscreen is not supported by this browser. Try rotating your phone or zooming the browser.', true);
+    }
   });
   $('downloadBtn').addEventListener('click', () => {
     if (!pdfBytes || !selectedFile) return;
-    const blob = new Blob([pdfBytes], { type: 'application/pdf' });
-    const url = URL.createObjectURL(blob);
+    const url = URL.createObjectURL(new Blob([pdfBytes], { type: 'application/pdf' }));
     const anchor = document.createElement('a');
     anchor.href = url; anchor.download = selectedFile.name;
     document.body.appendChild(anchor); anchor.click(); anchor.remove();
